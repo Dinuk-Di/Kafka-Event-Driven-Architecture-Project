@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.3.0
@@ -10,350 +12,56 @@ services:
     image: confluentinc/cp-kafka:7.3.0
     container_name: kafka
     ports:
+      # Exposes Kafka to your host machine on port 9092
       - "9092:9092"
     depends_on:
       - zookeeper
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      # Listeners:
+      # - PLAINTEXT://kafka:29092 is for internal communication between containers
+      # - PLAINTEXT_HOST://localhost:9092 is for communication from your host machine
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
-  notification-service:
-    build: ./notification-service
-    container_name: notification-service
+  order-service:
+    # Build the Dockerfile located in the ./order-service directory
+    build:
+      context: .
+      dockerfile: ./order-service/Dockerfile
+    container_name: order-service
     ports:
-      - "8083:8083"
+      # Maps your host port 8085 to the container's port 8085
+      - "8085:8085"
     depends_on:
-      - kafka
+      kafka:
+        condition: service_started
     environment:
-      # Point the service to the Kafka container
+      # This OVERRIDES the value in application.properties
+      # It correctly points to the internal Kafka listener
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      # Pass your SendGrid API key and from-email to the container
+      # Your application properties
+      SERVER_PORT: 8085
+      SPRING_KAFKA_TOPIC_NAME: order-topic
+      # Placeholders for your API keys
       SENDGRID_API_KEY: "YOUR_REAL_SENDGRID_API_KEY"
       SENDGRID_FROM_EMAIL: "your-verified-sender@example.com"
-  mysql-auth:
-    image: mysql:8.0
-    container_name: mysql-auth
-    environment:
-      MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: authdb
-      MYSQL_USER: authuser
-      MYSQL_PASSWORD: authpass
-    ports:
-      - "33051:3306"
-    volumes:
-      - mysql_auth_data:/var/lib/mysql
-      - ./mysql-init/auth-exporter-user.sql:/docker-entrypoint-initdb.d/auth-exporter-user.sql:ro
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
 
-  mysql-food:
-    image: mysql:8.0
-    container_name: mysql-food
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: fooddb
-      MYSQL_USER: user
-      MYSQL_PASSWORD: password
-    ports:
-      - "33071:3306"
-    volumes:
-      - mysql_food_data:/var/lib/mysql
-      - ./mysql-init/food-exporter-user.sql:/docker-entrypoint-initdb.d/food-exporter-user.sql:ro
-    command: --bind-address=0.0.0.0 --skip-name-resolve
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  mysql-order:
-    image: mysql:8.0
-    container_name: mysql-order
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: orderdb
-      MYSQL_USER: user
-      MYSQL_PASSWORD: password
-    ports:
-      - "33081:3306"
-    volumes:
-      - mysql_order_data:/var/lib/mysql
-      - ./mysql-init/order-exporter-user.sql:/docker-entrypoint-initdb.d/order-exporter-user.sql:ro
-    command: --bind-address=0.0.0.0 --skip-name-resolve
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  authservice:
-    build: ./backend/authservice
-    container_name: authservice
-    ports:
-      - "8081:8081"
+  kafka-consumer:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka-consumer
     depends_on:
-      mysql-auth:
-        condition: service_healthy
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      SPRING_PROFILES_ACTIVE: docker
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-auth:3306/authdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: password
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
-      interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 120s
-
-  foodservice:
-    build: ./backend/foodservice
-    container_name: foodservice
-    ports:
-      - "9093:9093"
-    volumes:
-      - ./uploads:/uploads
-    depends_on:
-      mysql-food:
-        condition: service_healthy
-    restart: unless-stopped
-    environment:
-      SPRING_PROFILES_ACTIVE: docker
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-food:3306/fooddb
-      SPRING_DATASOURCE_USERNAME: user
-      SPRING_DATASOURCE_PASSWORD: password
-      # File upload configuration
-      SPRING_SERVLET_MULTIPART_ENABLED: "true"
-      SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE: "5MB"
-      SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE: "5MB"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9093/actuator/health"]
-      interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 120s
-
-  orderservice:
-    build: ./backend/orderservice
-    container_name: orderservice
-    ports:
-      - "9094:9094"
-    depends_on:
-      mysql-order:
-        condition: service_healthy
-      authservice:
-        condition: service_healthy
-      foodservice:
-        condition: service_healthy
-    restart: unless-stopped
-    environment:
-      SPRING_PROFILES_ACTIVE: docker
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-order:3306/orderdb
-      SPRING_DATASOURCE_USERNAME: user
-      SPRING_DATASOURCE_PASSWORD: password
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9094/actuator/health"]
-      interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 120s
-
-  apigateway:
-    build: ./backend/apigateway
-    container_name: apigateway
-    ports:
-      - "8080:8080"
-    depends_on:
-      authservice:
-        condition: service_healthy
-      foodservice:
-        condition: service_healthy
-      orderservice:
-        condition: service_healthy
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      SPRING_PROFILES_ACTIVE: docker
-      AUTH_SERVICE_URL: http://authservice:8081
-      ORDER_SERVICE_URL: http://orderservice:9094
-      FOOD_SERVICE_URL: http://foodservice:9093
-      # File upload configuration
-      SPRING_SERVLET_MULTIPART_ENABLED: "true"
-      SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE: "5MB"
-      SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE: "5MB"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health", "||", "exit", "1"]
-      interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 180s
-
-  frontend:
-    build: 
-      context: ./frontend
-      args:
-        VITE_API_URL: http://localhost:8080
-    container_name: frontend
-    ports:
-      - "5173:80"
-    depends_on:
-      - apigateway
-    restart: unless-stopped
-    environment:
-      - VITE_API_URL=http://localhost:8080
-
-  # File server for serving uploaded images
-  file-server:
-    image: nginx:alpine
-    container_name: file-server
-    ports:
-      - "8090:80"
-    volumes:
-      - ./uploads:/usr/share/nginx/html/uploads:ro
-    restart: unless-stopped
+      - kafka
+    # This command block is now corrected
     command: >
       sh -c "
-      echo 'server {
-        listen 80;
-        server_name localhost;
+        echo 'Waiting for Kafka to be ready...'
+        cub kafka-ready -b kafka:29092 1 60
+        echo 'Kafka is ready!'
         
-        location /uploads/ {
-          root /usr/share/nginx/html;
-          expires 1y;
-          add_header Cache-Control \"public, immutable\";
-          add_header Access-Control-Allow-Origin \"*\";
-          try_files \$$uri =404;
-        }
-        
-        location / {
-          return 404;
-        }
-      }' > /etc/nginx/conf.d/default.conf &&
-      nginx -g 'daemon off;'
+        # This is now on a single line to avoid shell errors
+        kafka-console-consumer --bootstrap-server kafka:29092 --topic order-topic --from-beginning
       "
-
-    # =========================
-  # Monitoring stack
-  # =========================
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./monitoring/alerting:/etc/prometheus/alerting:ro
-      - prometheus_data:/prometheus
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
-    ports:
-      - "9090:9090"
-    restart: unless-stopped
-    depends_on:
-      - authservice
-      - foodservice
-      - orderservice
-      - apigateway
-      - cadvisor
-      - blackbox-exporter
-      - mysql-auth-exporter
-      - mysql-food-exporter
-      - mysql-order-exporter
-
-  grafana:
-    image: grafana/grafana-oss:latest
-    container_name: grafana
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin123   # change this
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-    ports:
-      - "3001:3000"   # 3000 is used by your frontend, so expose Grafana on 3001
-    restart: unless-stopped
-    depends_on:
-      - prometheus
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
-    container_name: cadvisor
-    privileged: true
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
-    ports:
-      - "8085:8080"  # optional to view cAdvisor UI from host
-    restart: unless-stopped
-
-  # Optional (Linux hosts): node exporter for host-level CPU/RAM/disk metrics
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: node-exporter
-    pid: host
-    network_mode: host
-    restart: unless-stopped
-    # no ports published; runs on host :9100 via host network
-
-  blackbox-exporter:
-    image: prom/blackbox-exporter:latest
-    container_name: blackbox-exporter
-    ports:
-      - "9115:9115"  # optional; Prometheus uses internal address anyway
-    restart: unless-stopped
-
-  # MySQL exporters (quick-start using root creds)
-  mysql-auth-exporter:
-    image: prom/mysqld-exporter:latest
-    container_name: mysql-auth-exporter
-    environment:
-      DATA_SOURCE_NAME: exporter:exporterpass@tcp(mysql-auth:3306)/
-    restart: unless-stopped
-    depends_on:
-      mysql-auth:
-        condition: service_healthy
-
-  mysql-food-exporter:
-    image: prom/mysqld-exporter:latest
-    container_name: mysql-food-exporter
-    environment:
-      DATA_SOURCE_NAME: exporter:exporterpass@tcp(mysql-food:3306)/
-    restart: unless-stopped
-    depends_on:
-      mysql-food:
-        condition: service_healthy
-
-  mysql-order-exporter:
-    image: prom/mysqld-exporter:latest
-    container_name: mysql-order-exporter
-    environment:
-      DATA_SOURCE_NAME: exporter:exporterpass@tcp(mysql-order:3306)/
-    restart: unless-stopped
-    depends_on:
-      mysql-order:
-        condition: service_healthy
-
-
-volumes:
-  mysql_auth_data:
-  mysql_food_data:
-  mysql_order_data:
-  prometheus_data:
-  grafana_data:
