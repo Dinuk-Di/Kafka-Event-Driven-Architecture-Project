@@ -1,4 +1,3 @@
-````markdown
 # Event-Driven Architecture with Spring Boot and Kafka
 
 ![Java](https://img.shields.io/badge/Java-21-blue.svg) ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.x-brightgreen.svg) ![Apache Kafka](https://img.shields.io/badge/Apache%20Kafka-darkblue.svg) ![Docker](https://img.shields.io/badge/Docker%20Compose-blue.svg)
@@ -184,4 +183,3 @@ This is the best part. Open three new terminal windows.
     2025-11-11T14:30:00.125 INFO 1 --- [email-service] ... : Order event received => {"orderId":"1001", ...}
     2025-11-11T14:30:00.567 INFO 1 --- [email-service] ... : Email sent successfully!
     ```
-```
