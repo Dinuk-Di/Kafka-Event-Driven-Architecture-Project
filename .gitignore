@@ -1,0 +1,24 @@
+*.zip
+*.rar
+*.7z
+
+# Ignore log files
+*.log
+*.out
+*.err
+# Ignore temporary files
+*.tmp
+*.swp
+*.bak
+
+# Ignore compiled files
+*.class
+*.o
+*.so
+
+# Ignore IDE specific files
+.vscode/
+.idea/
+*.iml
+
+*.env
